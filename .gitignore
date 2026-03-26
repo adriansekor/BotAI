@@ -1,2 +1,13 @@
-venv/ 
-__pycache__/ 
+# Entorn virtual
+venv/
+.env
+
+# Claus de seguretat (NO LES PUJIS!)
+*.json
+credentials.json
+botai-paco-*.json
+
+# Fitxers temporals de Python
+__pycache__/
+*.pyc
+.streamlit/
