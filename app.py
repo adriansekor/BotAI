@@ -1,173 +1,130 @@
 import streamlit as st
 import google.generativeai as genai
-import os
 import datetime
-from pathlib import Path
+import time  # Necesario para el efecto de escritura
+from config import GOOGLE_API_KEY, SERVICIOS_PATH
 from calendar_handler import leer_proximas_citas, crear_cita
-from rag_db import vector_db, buscar_contexto
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from PyPDF2 import PdfReader
+from rag_db import buscar_contexto, indexar_documentos_locales
+from prompts import obtener_system_prompt
 
-# CONFIGURACIÓN CARPETAS
-DOCS_DIR = "documentos"
-os.makedirs(DOCS_DIR, exist_ok=True)
+# --- FUNCIÓN PARA CARGAR CSS EXTERNO ---
+def local_css(file_name):
+    try:
+        with open(file_name, encoding="utf-8") as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        pass
 
+# --- 1. CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Paco's Barber Shop", page_icon="✂️", layout="centered")
+local_css("style.css")
 
-# GUARDAR ARCHIVOS SUBIDOS
-def guardar_archivo(file):
-    ruta = os.path.join(DOCS_DIR, file.name)
-    with open(ruta, "wb") as f:
-        f.write(file.getbuffer())
-    return ruta
+# --- 2. CABECERA VISUAL ---
+st.title("💈 Perruqueria Paco ✂️")
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.image("img/logo.png", use_container_width=True)
+st.markdown("<p style='text-align: center; font-style: italic;'>Tallat amb estil, cuidat amb tradició.</p>", unsafe_allow_html=True)
 
-# INDEXAR DOCUMENTOS EN CHROMA
-def indexar_documentos():
-    textos = []
-
-    for archivo in os.listdir(DOCS_DIR):
-        ruta = os.path.join(DOCS_DIR, archivo)
-
-        if archivo.endswith(".pdf"):
-            pdf = PdfReader(ruta)
-            for page in pdf.pages:
-                texto = page.extract_text()
-                if texto:
-                    textos.append(texto)
-
-        elif archivo.endswith(".txt") or archivo.endswith(".md"):
-            with open(ruta, "r", encoding="utf-8") as f:
-                textos.append(f.read())
-
-    if not textos:
-        return
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
-    )
-
-    docs = splitter.create_documents(textos)
-    vector_db.add_documents(docs)
-    vector_db.persist()
-
-
-# API GEMINI
-GOOGLE_API_KEY = ""
+# CONFIGURACIÓN IA
 genai.configure(api_key=GOOGLE_API_KEY)
 
-
-# INTERFAZ STREAMLIT
-st.set_page_config(page_title="BotAI: Perruqueria Paco", page_icon="✂️")
-st.title("BotAI: Assistent Perruqueria Paco")
-
-
-# Indexar documentos al arrancar la app
+# Inicialización automática de la BDD
 if "db_inicializada" not in st.session_state:
-    indexar_documentos()
+    with st.spinner("Cregant base de coneixement..."):
+        indexar_documentos_locales()
     st.session_state.db_inicializada = True
 
-
-# SIDEBAR — SUBIR DOCUMENTOS
-st.sidebar.title("Base de datos")
-
-uploaded_files = st.sidebar.file_uploader(
-    "Sube documentos para entrenar al bot",
-    type=["txt", "pdf", "md"],
-    accept_multiple_files=True
-)
-
-if uploaded_files:
-    for file in uploaded_files:
-        guardar_archivo(file)
-
-    with st.spinner("Indexando documentos..."):
-        indexar_documentos()
-
-    st.sidebar.success("Documentos guardados e indexados ✅")
-
-st.write("Benvingut! Soc en Paco, com et puc ajudar avui?")
-
+# LECTURA DE SERVICIOS
+try:
+    with open(SERVICIOS_PATH, "r", encoding="utf-8") as f:
+        contingut_txt = f.read()
+except FileNotFoundError:
+    contingut_txt = "Tall Cavaller 15€, Senyora 22€."
 
 # MEMORIA CHAT
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hola! Soc en Paco, el teu barber virtual. En què et puc ajudar avui?"}
+    ]
 
+# Mostrar historial
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+# --- 3. BOTONES DE ACCESO RÁPIDO ---
+if st.session_state.messages[-1]["role"] == "assistant":
+    st.write("Triar una opció ràpida:")
+    c1, c2, c3 = st.columns(3)
+    if c1.button("💰 Veure preus"):
+        st.session_state.messages.append({"role": "user", "content": "Quins preus teniu?"})
+        st.rerun()
+    if c2.button("📅 Demanar cita"):
+        st.session_state.messages.append({"role": "user", "content": "Vull demanar una cita"})
+        st.rerun()
+    if c3.button("📍 On sou?"):
+        st.session_state.messages.append({"role": "user", "content": "On està la barberia?"})
+        st.rerun()
 
-# INPUT USUARIO
-if prompt := st.chat_input("Escriu la teva consulta..."):
+st.markdown("---")
 
+# --- 4. LÓGICA DE PROCESAMIENTO (INPUT + BOTONES) ---
+prompt = st.chat_input("Escriu la teva consulta...")
+
+hay_mensaje_nuevo = False
+texto_a_enviar = ""
+
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
+    texto_a_enviar = prompt
+    hay_mensaje_nuevo = True
     with st.chat_message("user"):
         st.markdown(prompt)
+elif len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
+    texto_a_enviar = st.session_state.messages[-1]["content"]
+    hay_mensaje_nuevo = True
 
-    # Leer servicios
-    ruta_fitxer = Path(__file__).parent / "servicios.txt"
-    try:
-        with open(ruta_fitxer, "r", encoding="utf-8") as f:
-            contingut_txt = f.read()
-    except FileNotFoundError:
-        contingut_txt = "Tall Cavaller 15€, Senyora 22€."
-
+if hay_mensaje_nuevo:
     avui = datetime.datetime.now().strftime("%A, %d de %B de %Y, %H:%M")
-
-    with st.spinner("Consultant agenda..."):
+    with st.spinner("En Paco està consultant la seva agenda..."):
         info_calendari = leer_proximas_citas()
+        contexto_rag = buscar_contexto(texto_a_enviar)
 
-    # RAG
-    try:
-        contexto_rag = buscar_contexto(prompt)
-    except:
-        contexto_rag = ""
+    system_prompt = obtener_system_prompt(
+        contexto_rag=contexto_rag,
+        info_calendari=info_calendari,
+        contingut_txt=contingut_txt,
+        avui=avui
+    )
 
+    history_gemini = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
+                      for m in st.session_state.messages[:-1]]
 
-    # SYSTEM PROMPT
-    system_prompt = f"""
-Ets en Paco, assistent d'una perruqueria. Parles català i ets amable.
-
-BASE DE CONEIXEMENT:
-{contexto_rag}
-
-DATA: {avui}
-SERVEIS: {contingut_txt}
-AGENDA: {info_calendari}
-
-REGLES:
-- Respostes curtes i naturals
-- Usa la base de coneixement si existeix
-- Si no saps alguna cosa, digues-ho
-- Si vol reservar -> usa crear_cita
-"""
-
-    chat = genai.GenerativeModel(
-        model_name='models/gemini-3-flash-preview',
+    model = genai.GenerativeModel(
+        model_name='models/gemini-1.5-flash',
         tools=[crear_cita],
         system_instruction=system_prompt
-    ).start_chat(enable_automatic_function_calling=True)
+    )
 
-    # Enviar historial SIN role (fix error)
-    for msg in st.session_state.messages[:-1]:
-        chat.send_message(msg["content"])
+    chat = model.start_chat(history=history_gemini, enable_automatic_function_calling=True)
 
-    # RESPUESTA IA
     try:
-        with st.spinner("En Paco està pensant..."):
-            response = chat.send_message(
-                prompt,
-                generation_config={"temperature": 0.4}
-            )
-        resposta_text = response.text or "Perfecte! ✂️"
-    except:
-        resposta_text = "Hi ha hagut un error, pots repetir?"
+        response = chat.send_message(texto_a_enviar, generation_config={"temperature": 0.4})
+        resposta_text = response.text or "Perfecte!"
+    except Exception as e:
+        resposta_text = "Estic una mica saturat, pots tornar a provar en uns segons?"
 
-    # Mostrar respuesta
+    # --- RESPUESTA CON EFECTO STREAMING ---
     with st.chat_message("assistant"):
-        st.markdown(resposta_text)
+        placeholder = st.empty()
+        full_response = ""
+        # Simulamos el streaming dividiendo el texto
+        for chunk in resposta_text.split(" "):
+            full_response += chunk + " "
+            time.sleep(0.04) # Velocidad de escritura
+            placeholder.markdown(full_response + "▌")
+        placeholder.markdown(full_response) # Texto final sin cursor
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": resposta_text
-    })
+    st.session_state.messages.append({"role": "assistant", "content": resposta_text})
+    st.rerun()

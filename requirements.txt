@@ -1,6 +1,24 @@
+# Interfaz y Servidor
 streamlit
+
+# Inteligencia Artificial (Gemini)
 google-generativeai
+
+# Google Calendar API
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
+# RAG y Base de Datos Vectorial
+langchain
+langchain-community
+langchain-huggingface
+langchain-text-splitters
+chromadb
+sentence-transformers
+
+# Procesamiento de Documentos
+PyPDF2
+
+# Utilidades
 pathlib

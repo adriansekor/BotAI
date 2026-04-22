@@ -1,0 +1,55 @@
+/* style.css */
+
+/* Fondo principal */
+.stApp {
+    background-color: #fdfaf6;
+}
+
+/* Estilo del Header / Título */
+h1 {
+    color: #2c3e50;
+    font-family: 'Playfair Display', serif;
+    text-align: center;
+    border-bottom: 2px solid #e67e22;
+    padding-bottom: 10px;
+}
+
+/* Burbujas de chat del Usuario */
+.stChatMessage[data-testid="stChatMessageUser"] {
+    background-color: #dcdde1 !important;
+    border-radius: 15px 15px 0px 15px !important;
+    border: 1px solid #7f8c8d;
+}
+
+/* Burbujas de chat de Paco */
+.stChatMessage[data-testid="stChatMessageAssistant"] {
+    background-color: #2c3e50 !important;
+    color: white !important;
+    border-radius: 15px 15px 15px 0px !important;
+    border-left: 5px solid #e67e22;
+}
+
+/* Ocultar widgets de estado */
+.stChatMessage [data-testid="stStatusWidget"] {
+    visibility: hidden;
+}
+
+/* Input de texto */
+.stChatInputContainer {
+    padding-bottom: 20px;
+}
+
+/* Barra lateral */
+[data-testid="stSidebar"] {
+    background-color: #1a1a1a;
+    color: white;
+}
+
+[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2 {
+    color: #e67e22 !important;
+}
+
+
+
+
+
