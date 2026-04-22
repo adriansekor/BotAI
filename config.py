@@ -1,21 +1,6 @@
-
-.env
-
-# Ignorem totes les credencials de Google Calendar (fitxers JSON reals)
-credentials/*.json
-botai-paco-*.json
-
-# --- Fitxers de l'Editor i Sistema ---
-.idea/
-.vscode/
-.DS_Store
-Thumbs.db
-
-# --- Fitxers temporals de Python ---
-venv/
-__pycache__/
-*.pyc
-.streamlit/config.toml
-
-# --- Dades locals (RAG) ---
-chroma_db/
+# config.py
+import os
+DOCS_DIR = "data/documentos"
+SERVICIOS_PATH = "data/servicios.txt"
+GOOGLE_API_KEY = "PON AQUÍ TU API KEY"
+CREDENTIALS_FILE = "credentials/botai-paco-07b7bfb4e75d.json"
