@@ -1,13 +1,15 @@
 import streamlit as st
 import google.generativeai as genai
 import datetime
-import time  # Necesario para el efecto de escritura
+import time
 from config import GOOGLE_API_KEY, SERVICIOS_PATH
 from calendar_handler import leer_proximas_citas, crear_cita
 from rag_db import buscar_contexto, indexar_documentos_locales
 from prompts import obtener_system_prompt
 
-# --- FUNCIÓN PARA CARGAR CSS EXTERNO ---
+# --- 1. CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Paco's Barber Shop", page_icon="✂️", layout="centered")
+
 def local_css(file_name):
     try:
         with open(file_name, encoding="utf-8") as f:
@@ -15,21 +17,20 @@ def local_css(file_name):
     except FileNotFoundError:
         pass
 
-# --- 1. CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Paco's Barber Shop", page_icon="✂️", layout="centered")
 local_css("style.css")
 
 # --- 2. CABECERA VISUAL ---
 st.title("💈 Perruqueria Paco ✂️")
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.image("img/logo.png", use_container_width=True)
+    # Cambio: use_container_width por width='stretch' (evita warnings)
+    st.image("img/logo.png", width=300)
 st.markdown("<p style='text-align: center; font-style: italic;'>Tallat amb estil, cuidat amb tradició.</p>", unsafe_allow_html=True)
 
 # CONFIGURACIÓN IA
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Inicialización automática de la BDD
+# Inicialización BDD
 if "db_inicializada" not in st.session_state:
     with st.spinner("Cregant base de coneixement..."):
         indexar_documentos_locales()
@@ -69,62 +70,59 @@ if st.session_state.messages[-1]["role"] == "assistant":
 
 st.markdown("---")
 
-# --- 4. LÓGICA DE PROCESAMIENTO (INPUT + BOTONES) ---
+# --- 4. LÓGICA DE PROCESAMIENTO ---
 prompt = st.chat_input("Escriu la teva consulta...")
-
-hay_mensaje_nuevo = False
-texto_a_enviar = ""
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
-    texto_a_enviar = prompt
-    hay_mensaje_nuevo = True
     with st.chat_message("user"):
         st.markdown(prompt)
-elif len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
-    texto_a_enviar = st.session_state.messages[-1]["content"]
-    hay_mensaje_nuevo = True
 
-if hay_mensaje_nuevo:
+    # Preparamos la respuesta
     avui = datetime.datetime.now().strftime("%A, %d de %B de %Y, %H:%M")
-    with st.spinner("En Paco està consultant la seva agenda..."):
-        info_calendari = leer_proximas_citas()
-        contexto_rag = buscar_contexto(texto_a_enviar)
 
-    system_prompt = obtener_system_prompt(
-        contexto_rag=contexto_rag,
-        info_calendari=info_calendari,
-        contingut_txt=contingut_txt,
-        avui=avui
-    )
+    with st.spinner("En Paco està pensant..."):
+        try:
+            info_calendari = leer_proximas_citas()
+            contexto_rag = buscar_contexto(prompt)
 
-    history_gemini = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]}
-                      for m in st.session_state.messages[:-1]]
+            system_prompt = obtener_system_prompt(
+                contexto_rag=contexto_rag,
+                info_calendari=info_calendari,
+                contingut_txt=contingut_txt,
+                avui=avui
+            )
 
-    model = genai.GenerativeModel(
-        model_name='models/gemini-1.5-flash',
-        tools=[crear_cita],
-        system_instruction=system_prompt
-    )
+            # Reconstrucción del historial para Gemini
+            history_gemini = []
+            for m in st.session_state.messages[:-1]:
+                role = "user" if m["role"] == "user" else "model"
+                history_gemini.append({"role": role, "parts": [m["content"]]})
 
-    chat = model.start_chat(history=history_gemini, enable_automatic_function_calling=True)
+            model = genai.GenerativeModel(
+                model_name='gemini-3-flash-preview', # Nombre corregido sin 'models/'
+                tools=[crear_cita],
+                system_instruction=system_prompt
+            )
 
-    try:
-        response = chat.send_message(texto_a_enviar, generation_config={"temperature": 0.4})
-        resposta_text = response.text or "Perfecte!"
-    except Exception as e:
-        resposta_text = "Estic una mica saturat, pots tornar a provar en uns segons?"
+            chat = model.start_chat(history=history_gemini, enable_automatic_function_calling=True)
+            response = chat.send_message(prompt)
 
-    # --- RESPUESTA CON EFECTO STREAMING ---
-    with st.chat_message("assistant"):
-        placeholder = st.empty()
-        full_response = ""
-        # Simulamos el streaming dividiendo el texto
-        for chunk in resposta_text.split(" "):
-            full_response += chunk + " "
-            time.sleep(0.04) # Velocidad de escritura
-            placeholder.markdown(full_response + "▌")
-        placeholder.markdown(full_response) # Texto final sin cursor
+            resposta_text = response.text
 
-    st.session_state.messages.append({"role": "assistant", "content": resposta_text})
-    st.rerun()
+            # --- RESPUESTA CON EFECTO STREAMING ---
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                full_response = ""
+                for chunk in resposta_text.split(" "):
+                    full_response += chunk + " "
+                    time.sleep(0.04)
+                    placeholder.markdown(full_response + "▌")
+                placeholder.markdown(full_response)
+
+            st.session_state.messages.append({"role": "assistant", "content": resposta_text})
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Error detallat: {e}") # ESTO NOS DIRÁ EL FALLO REAL
+            st.session_state.messages.append({"role": "assistant", "content": "Perdona, he tingut un error tècnic."})
